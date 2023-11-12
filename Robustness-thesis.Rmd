@@ -1,0 +1,1701 @@
+---
+title: "Robustness Thesis"
+author: "Alessandro Tenderini"
+date: "6/2/2022"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r}
+library(quantmod) 
+library(RobStatTM)
+library(robustbase)
+library(rrcov)
+library(MASS)
+library(ggplot2)
+library(car)
+library(dplyr)
+
+backup_options <- options()
+```
+
+```{r FAMA}
+#FAMA of NYSE, AMEX, and NASDAQ
+
+fama<-read.csv("F-F_Research_Data_Factors_weekly.csv",skip=3)
+fama[,2:5]<-fama[,2:5]/100
+fama<-fama[4775:4983,]
+colnames(fama)[1] = "Date"
+fama$Date = as.Date(strptime(fama$Date, format = "%Y%m%d"))
+```
+
+```{r Stocks by sector}
+#Stocks by sector
+
+telecomunication<-read.csv("nasdaq_screener_1654521025546.csv")
+energy<-read.csv("nasdaq_screener_1654521297563.csv")
+utilities<-read.csv("nasdaq_screener_1654521309111.csv")
+basic_materials<-read.csv("nasdaq_screener_1654521287967.csv")
+industrial<-read.csv("nasdaq_screener_1654521281759.csv")
+consumer_staples<-read.csv("nasdaq_screener_1654521273677.csv")
+consumer_discrectionary<-read.csv("nasdaq_screener_1654521261791.csv")
+real_estate<-read.csv("nasdaq_screener_1654521249335.csv")
+financial<-read.csv("nasdaq_screener_1654521239298.csv")
+healthcare<-read.csv("nasdaq_screener_1654521232200.csv")
+technology<-read.csv("nasdaq_screener_1654521221909.csv")
+
+
+telecomunication<-arrange(filter(telecomunication, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+energy<-arrange(filter(energy, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+utilities<-arrange(filter(utilities, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+basic_materials<-arrange(filter(basic_materials, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+industrial<-arrange(filter(industrial, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+consumer_staples<-arrange(filter(consumer_staples), desc(Market.Cap))$Symbol[1:20]
+
+consumer_discrectionary<-arrange(filter(consumer_discrectionary, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+real_estate<-arrange(filter(real_estate, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+financial<-arrange(filter(financial, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+healthcare<-arrange(filter(healthcare, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+technology<-arrange(filter(technology, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+
+#Stocks by sector
+
+symbols<-c(telecomunication,energy,utilities,basic_materials,industrial,consumer_staples,consumer_discrectionary,real_estate,financial,healthcare,technology)
+
+#stocks = lapply(symbols, function(sym){weeklyReturn(getSymbols(sym, from = "2018-1-1", to = "2021-12-31", auto.assign=FALSE))})
+#stocksWreturn<-do.call(merge, stocks)
+#colnames(stocksWreturn)<-symbols
+
+
+#write.csv(stocksWreturn,file = "stocksWreturn.csv")
+```
+
+```{r final dataset}
+#CREATE final dataset
+
+#stocksWreturn<-fortify.zoo(stocksWreturn)
+#colnames(stocksWreturn)<-c("Date", symbols)
+#stocksWreturn[,2:ncol(stocksWreturn)]<-stocksWreturn[,2:ncol(stocksWreturn)]-fama$RF #obtain excess return
+#data = merge(stocksWreturn, fama, by = "Date")
+
+  #write.csv(data,file = "data.csv")
+data<-read.csv("data.csv")[,-1]
+```
+
+```{r LIST of REGRESSION CAPM (OLS and MM)}
+#TWO LIST of REGRESSION CAPM (OLS and MM)
+
+OLS_regressions <- list()  
+for(i in 2:(ncol(data)-4)) {                
+ OLS_regressions[[i-1]] <-  lm(data[,i] ~ Mkt.RF, data=data)
+}
+MM_regressions <- list()  
+for(i in 2:(ncol(data)-4)) {                
+ MM_regressions[[i-1]] <-  lmrobdetMM(data[,i] ~ Mkt.RF, data=data)
+}
+
+
+```
+
+```{r dataframe with two columns for OLS and MM betas}
+#create dataframe with two columns for OLS and MM betas
+
+beta_LS<-c()
+beta_mOpt<-c()
+
+for(i in 1:length(OLS_regressions)){
+  beta_LS<-c(beta_LS,OLS_regressions[[i]]$coefficients[2])
+  beta_mOpt<-c(beta_mOpt,MM_regressions[[i]]$coefficients[2])
+}
+
+sector<-c("telecomunication","energy","utilities","basic_materials","industrial","consumer_staples","consumer_discrectionary","real_estate","financial","healthcare","technology")
+sector<-rep(sector, each=20)
+beta<-data.frame(beta_LS,beta_mOpt,sector,symbols)
+
+
+```
+
+```{r some analysis on betas}
+ 
+summarise(group_by(beta, sector), average_beta_LS = mean(beta_LS),average_beta_mOpt = mean(beta_mOpt), sd_beta_LS=sd(beta_LS),sd_beta_mOpt=sd(beta_mOpt))
+
+
+summarise(group_by(mutate(beta, diff = beta_LS- beta_mOpt ), sector), average_diff = mean(diff), sd_diff=sd(diff))
+```
+
+
+```{r plot of BETAS for CAPM}
+#plot of BETAS for CAPM
+
+ggplot(data = beta, aes(beta_LS,beta_mOpt, colour=sector, label=symbols))+geom_point(size=1)+
+geom_abline(intercept =0,slope=1, size=0.2)+
+  geom_text(check_overlap = TRUE,size = 2,vjust=0, nudge_y = 0.015)+
+  ggtitle("LS and mOpt regression for CAPM",subtitle = "Market beta  (1/1/2018 - 31/12/2021)")+theme_classic()
+```
+
+```{r TWO LIST of REGRESSION FAMA F (OLS and MM)}
+#TWO LIST of REGRESSION FAMA F (OLS and MM)
+
+OLS_regressions_F <- list()  
+for(i in 2:(ncol(data)-4)) {                
+ OLS_regressions_F[[i-1]] <-  lm(data[,i] ~ Mkt.RF+SMB+HML, data=data)
+}
+MM_regressions_F <- list()  
+for(i in 2:(ncol(data)-4)) {                
+ MM_regressions_F[[i-1]] <-  lmrobdetMM(data[,i] ~ Mkt.RF+SMB+HML, data=data)
+}
+
+```
+
+```{r dataframe with two columns for OLS and MM betas (FAMA F)}
+#create dataframe with two columns for OLS and MM betas (FAMA F)
+
+beta_OLS_MKT<-c()
+beta_MM_MKT<-c()
+beta_OLS_SMB<-c()
+beta_MM_SMB<-c()
+beta_OLS_HML<-c()
+beta_MM_HML<-c()
+
+for(i in 1:length(OLS_regressions)){
+  beta_OLS_MKT<-c(beta_OLS_MKT,OLS_regressions_F[[i]]$coefficients[2])
+  beta_MM_MKT<-c(beta_MM_MKT,MM_regressions_F[[i]]$coefficients[2])
+  beta_OLS_SMB<-c(beta_OLS_SMB,OLS_regressions_F[[i]]$coefficients[3])
+  beta_MM_SMB<-c(beta_MM_SMB,MM_regressions_F[[i]]$coefficients[3])
+  beta_OLS_HML<-c(beta_OLS_HML,OLS_regressions_F[[i]]$coefficients[4])
+  beta_MM_HML<-c(beta_MM_HML,MM_regressions_F[[i]]$coefficients[4])
+}
+
+sector<-c("telecomunication","energy","utilities","basic_materials","industrial","consumer_staples","consumer_discrectionary","real_estate","financial","healthcare","technology")
+sector<-rep(sector, each=20)
+beta_F<-data.frame(beta_OLS_MKT,beta_MM_MKT,beta_OLS_SMB,beta_MM_SMB,beta_OLS_HML,beta_MM_HML,sector,symbols)
+```
+
+```{r plot of BETAS for FAMA}
+#plot of BETAS for FAMA
+
+ggplot(data = beta, aes(beta_OLS_MKT,beta_MM_MKT, colour=sector, label=symbols))+geom_point(size=1)+
+geom_abline(intercept =0,slope=1, size=0.2)+
+  geom_text(check_overlap = TRUE,size = 2,vjust=0, nudge_y = 0.015)+
+  ggtitle("OLS and MM regression for Fama French 3 Factor",subtitle = "MKT beta  (1/1/2018 - 31/12/2021)")
+
+ggplot(data = beta, aes(beta_OLS_SMB,beta_MM_SMB, colour=sector, label=symbols))+geom_point(size=1)+
+geom_abline(intercept =0,slope=1, size=0.2)+
+  geom_text(check_overlap = TRUE,size = 2,vjust=0, nudge_y = 0.015)+
+  ggtitle("OLS and MM regression for Fama French 3 Factor",subtitle = "SMB beta  (1/1/2018 - 31/12/2021)")
+
+ggplot(data = beta, aes(beta_OLS_HML,beta_MM_HML, colour=sector, label=symbols))+geom_point(size=1)+
+geom_abline(intercept =0,slope=1, size=0.2)+
+  geom_text(check_overlap = TRUE,size = 2,vjust=0, nudge_y = 0.015)+
+  ggtitle("OLS and MM regression for Fama French 3 Factor",subtitle = "HML beta  (1/1/2018 - 31/12/2021)")
+
+```
+
+```{r outliers detenction, ELIMINATE THIS}
+### new regression with eval(parse(..))
+
+
+OLS_regressions <- list()  
+for(i in 2:(ncol(data)-4)) {                
+ OLS_regressions[[i-1]] <-  lm(eval(parse(text =symbols[i-1])) ~ Mkt.RF, data=data)
+}
+
+
+#### qqPlot
+
+
+#for(i in 2:(ncol(data)-4)) { qqPlot(OLS_regressions[[i-1]],labels=row.names(data), id.method="identify",simulate=TRUE, main=c("Q-Q Plot ",symbols[i-1]))}
+
+
+###
+
+
+#for(i in 2:(ncol(data)-4)) { print(outlierTest(OLS_regressions[[i-1]])$bonf.p)}
+
+
+### LEVERAGE POINTS
+
+
+ highleverage <- function(fit) {
+ p <- length(coefficients(fit))
+ n <- length(fitted(fit))
+ ratio <-p/n
+ plot(hatvalues(fit), main="Index Plot of Ratio")
+ abline(h=c(2,3)*ratio, col="red", lty=2)
+ identify(1:n, hatvalues(fit), names(hatvalues(fit)))
+ text(as.vector(which(hatvalues(fit)>3*ratio)),hatvalues(fit)[as.vector(which(hatvalues(fit)>3*ratio))],names(hatvalues(fit))[as.vector(which(hatvalues(fit)>3*ratio))],
+      pos=2,cex=0.5) ##finish 
+}
+
+#highleverage(OLS_regressions[[1]])
+
+
+### COOK DISTANCE
+
+#for(i in 2:(ncol(data)-4)) { cutoff <- 4/(nrow(data)-length(OLS_regressions[[i-1]]$coefficients)-2)plot(OLS_regressions[[i-1]], which=4, cook.levels=cutoff)abline(h=cutoff, lty=2, col="red")}
+
+
+### Influence points
+
+
+#for(i in 2:(ncol(data)-4)) {influencePlot(OLS_regressions[[i-1]], main="Influence Plot", sub="Circle size is proportional to Cook’s distance")  }
+
+```
+
+```{r Table with results for BETAS and test on the differences}
+### TABLE WITH RESULTS FOR BETAS
+
+table<-matrix(nrow=24, ncol = 4)
+table[1,1]<-mean(beta$beta_LS)
+table[1,2]<-mean(beta_F$beta_OLS_MKT) 
+table[1,3]<-mean(beta_F$beta_OLS_SMB) 
+table[1,4]<-mean(beta_F$beta_OLS_HML) 
+table[2,1]<-mean(beta$beta_mOpt)
+table[2,2]<-mean(beta_F$beta_MM_MKT) 
+table[2,3]<-mean(beta_F$beta_MM_SMB) 
+table[2,4]<-mean(beta_F$beta_MM_HML) 
+k<-0
+for (i in 1:11) {
+  j<-k+i
+table[j+2,1]<-mean(beta$beta_LS[(i*20-19):(20*i)])   
+table[j+2,2]<-mean(beta_F$beta_OLS_MKT[(i*20-19):(20*i)]) 
+table[j+2,3]<-mean(beta_F$beta_OLS_SMB[(i*20-19):(20*i)]) 
+table[j+2,4]<-mean(beta_F$beta_OLS_HML[(i*20-19):(20*i)])
+table[j+3,1]<-mean(beta$beta_mOpt[(i*20-19):(20*i)])
+table[j+3,2]<-mean(beta_F$beta_MM_MKT[(i*20-19):(20*i)]) 
+table[j+3,3]<-mean(beta_F$beta_MM_SMB[(i*20-19):(20*i)]) 
+table[j+3,4]<-mean(beta_F$beta_MM_HML[(i*20-19):(20*i)])
+k<-k+1
+}
+
+rownames(table)<-c("OLS","MM","OLS telecomunication","MM telecomunication", "OLS energy","MM energy","OLS utilities","MM utilities","OLS basic_materials","MM basic_materials", "OLS industrial","MM industrial","OLS consumer_staples","MM consumer_staples","OLS consumer_discrectionary","MM consumer_discrectionary","OLS real_estate","MM real_estate","OLS financial","MM financial","OLS healthcare","MM healthcare","OLS technology","MM technology")
+colnames(table)<-c("Capm Mkt beta", "FF Mkt beta", "FF SMB beta", "FF HML beta")
+beta_average<-as.data.frame(table)
+
+
+### table with differences
+
+k<-0
+difference<-NULL
+for (i in 1:12) {
+  j<-i+k
+  difference<-rbind(difference,beta_average[j,]-beta_average[(j+1),])
+  k<-k+1
+}
+
+colnames(difference)<-c("OLS Mkt beta - MM Mkt beta", "FF Mkt beta", "FF SMB beta", "FF HML beta")
+rownames(difference)<-c("Total","telecomunication","energy","utilities","basic_materials","industrial","consumer_staples","consumer_discrectionary","real_estate","financial","healthcare","technology")
+
+
+
+#The null hypothesis is that the OLS and MM estimation are identical populations
+#We reject if p < 0.05 (in this case the two estimators are statistically different)
+#if p < 0.05 the OLS and MM are different
+
+p.value<-c(wilcox.test(beta_LS, beta_mOpt, paired=TRUE)$p.value)
+CI_lower<-c(wilcox.test(beta_LS, beta_mOpt, paired=TRUE,
+conf.int=T)$conf.int[1])
+CI_upper<-c(wilcox.test(beta_LS, beta_mOpt, paired=TRUE,
+conf.int=T)$conf.int[2])
+
+for (i in 1:11) {
+p.value<-c(p.value,wilcox.test(beta_LS[(i*20-19):(20*i)], beta_mOpt[(i*20-19):(20*i)], paired=TRUE,conf.int=T)$p.value) 
+
+CI_lower<-c(CI_lower,wilcox.test(beta_LS[(i*20-19):(20*i)], beta_mOpt[(i*20-19):(20*i)], paired=TRUE,
+conf.int=T)$conf.int[1])
+CI_upper<-c(CI_upper,wilcox.test(beta_LS[(i*20-19):(20*i)], beta_mOpt[(i*20-19):(20*i)], paired=TRUE,
+conf.int=T)$conf.int[2])
+}
+
+
+
+difference$p.value<-p.value
+difference$CI_lower<-CI_lower
+difference$CI_upper<-CI_upper
+difference<-difference[,c(1,5,6,7,2,3,4)]
+
+
+options(scipen=999)
+difference 
+options(backup_options)
+
+
+
+```
+
+```{r Boxplot of BETAS}
+beta$LS_minus_mOpt<-beta$beta_LS-beta$beta_mOpt
+
+
+ggplot(beta, aes(x=sector, y=LS_minus_mOpt, fill=sector)) + 
+  geom_boxplot()+theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+ggplot(beta, aes(x=sector, y=beta_mOpt,fill=sector)) + 
+  geom_boxplot()+theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+ 
+ggplot(beta, aes(x="",y=LS_minus_mOpt)) + 
+  geom_boxplot(fill='#A4A4A4', color="black",outlier.shape = NA)+theme_classic() +
+  geom_jitter(width = 0.25,colour=2,size=0.6)
+#+stat_summary(fun.y=mean, geom="point", shape=20, size=3, color="blue")
+
+ggplot(beta, aes(x="",y=beta_mOpt)) + 
+  geom_boxplot(fill='#A4A4A4', color="black",outlier.shape = NA)+theme_bw()+
+  geom_jitter(width = 0.25,colour=2,size=1)
+
+
+mean(beta$LS_minus_mOpt)
+median(beta$LS_minus_mOpt)
+
+```
+
+```{r Roubust outliers detection}
+use<-select(data, VZ, Mkt.RF)
+
+#plot(covMcd(use), which = c("tolEllipsePlot"), classic=T, labels.id = data$Date)
+
+covPlot(use,m.cov = covMcd(use),classic=T, labels.id = data$Date,which = "distance")
+covPlot(use,m.cov = covMcd(use),classic=T, labels.id = data$Date,which = "tolEllipsePlot")
+covPlot(use,m.cov = CovMve(use),classic=T, labels.id = data$Date,which = "distance")
+covPlot(use,m.cov = CovMve(use),classic=T, labels.id = data$Date,which = "tolEllipsePlot")
+
+#Plot of robust residuals (residuals from LMS) VS robust distances
+res<-lmsreg(VZ~Mkt.RF, data=data)$residuals/lmsreg(VZ~Mkt.RF, data=data)$scale[1]
+mve_d<-sqrt(CovMve(use)$mah)
+mcd_d<-sqrt(covMcd(use)$mah)
+
+
+plot(mve_d,res,
+     text(
+          mve_d[unique(which(mve_d>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],
+          res[unique(which(mve_d>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],
+          data$Date[unique(which(mve_d>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],pos=2,cex=0.5
+          ),
+     xlab="Robust Distance",ylab="Standardized LMS residuals"
+     )
+abline(v=sqrt(qchisq(.975, df=2)))
+abline(h=c(2.5,-2.5))
+
+reg<-lm(VZ~Mkt.RF, data=data)
+res2<-rstandard(reg)
+d<-sqrt(mahalanobis(use, center = colMeans(use), cov=cov(use)))
+plot(d,res2,
+     text(
+          d[unique(which(d>sqrt(qchisq(.975, df=2))|abs(res2)>2.5))],
+          res2[unique(which(d>sqrt(qchisq(.975, df=2))|abs(res2)>2.5))],
+          data$Date[unique(which(d>sqrt(qchisq(.975, df=2))|abs(res2)>2.5))],pos=2,cex=0.5
+          ),
+     xlab="Classic Mahalanobis Distance",ylab="Standardized LS residuals"
+     )
+
+abline(v=sqrt(qchisq(.975, df=2)))
+abline(h=c(2.5,-2.5))
+
+
+#NOW MM RESIDUALS
+
+#four categories: the regular observations with small RDi and small ri, the vertical outliers with small RDi and large ri, the good leverage points with large RDi and small ri, and the bad leverage points with large RDi and large ri
+res<-lmrobdetMM(VTR~Mkt.RF, data=data)$residuals/lmrobdetMM(VTR~Mkt.RF, data=data)$scale
+mve_d<-sqrt(CovMve(use)$mah)
+mcd_d<-sqrt(covMcd(use)$mah)
+
+
+plot(mve_d,res,
+     text(
+          mve_d[unique(which(mve_d>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],
+          res[unique(which(mve_d>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],
+          data$Date[unique(which(mve_d>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],pos=2,cex=0.5
+          ),
+     xlab="Robust Distance",ylab="Standardized LMS residuals"
+     )
+abline(v=sqrt(qchisq(.975, df=2)))
+abline(h=c(2.5,-2.5))
+
+reg<-lm(VZ~Mkt.RF, data=data)
+res2<-rstandard(reg)
+d<-sqrt(mahalanobis(use, center = colMeans(use), cov=cov(use)))
+plot(d,res2,
+     text(
+          d[unique(which(d>sqrt(qchisq(.975, df=2))|abs(res2)>2.5))],
+          res2[unique(which(d>sqrt(qchisq(.975, df=2))|abs(res2)>2.5))],
+          data$Date[unique(which(d>sqrt(qchisq(.975, df=2))|abs(res2)>2.5))],pos=2,cex=0.5
+          ),
+     xlab="Classic Mahalanobis Distance",ylab="Standardized LS residuals"
+     )
+
+abline(v=sqrt(qchisq(.975, df=2)))
+abline(h=c(2.5,-2.5))
+
+```
+
+```{r Roubust outliers detection 2}
+#four categories: the regular observations with small RDi and small ri, the vertical outliers with small RDi and large ri, the good leverage points with large RDi and small ri, and the bad leverage points with large RDi and large ri
+
+##VTR
+use<-select(data, VTR, Mkt.RF)
+res<-lmrobdetMM(VTR~Mkt.RF, data=data)$residuals/lmrobdetMM(VTR~Mkt.RF, data=data)$scale
+
+mcd.out <-covMcd(use$Mkt.RF)
+rds <- abs((use$Mkt.RF - mcd.out$center)/sqrt(mcd.out$cov))
+
+
+plot(rds,res,main="VTR weekly return",
+     text(
+          rds[unique(which(rds>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],
+          res[unique(which(rds>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],
+          data$Date[unique(which(rds>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],pos=2,cex=0.5
+          ),
+     xlab="Robust Distance",ylab="Standardized mOpt residuals",
+     cex =0.3)
+abline(v=sqrt(qchisq(.975, df=2)))
+abline(h=c(2.5,-2.5))
+
+#### "APA"  "BA"  "WELL" "SPG" 
+
+use<-select(data, WELL, Mkt.RF)
+res<-lmrobdetMM(WELL~Mkt.RF, data=data)$residuals/lmrobdetMM(WELL~Mkt.RF, data=data)$scale
+
+mcd.out <-covMcd(use$Mkt.RF)
+rds <- abs((use$Mkt.RF - mcd.out$center)/sqrt(mcd.out$cov))
+
+
+plot(rds,res,main="WELL weekly return",
+     text(
+          rds[unique(which(rds>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],
+          res[unique(which(rds>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],
+          data$Date[unique(which(rds>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],pos=2,cex=0.5
+          ),
+     xlab="Robust Distance",ylab="Standardized mOpt residuals",
+     cex =0.3)
+abline(v=sqrt(qchisq(.975, df=2)))
+abline(h=c(2.5,-2.5))
+
+plot(rds,res,main="WELL weekly return",
+     text(
+          rds[ c(51, 113, 115, 116 ,117, 118, 119 ,120  ,125 ,127, 150)],
+          res[ c(51, 113, 115, 116 ,117, 118, 119 ,120  ,125 ,127, 150)],
+          data$Date[ c(51, 113, 115, 116 ,117, 118, 119 ,120  ,125 ,127, 150)],pos=2,cex=0.65
+          ),
+     xlab="Robust Distance",ylab="Standardized mOpt residuals",
+     cex =0.3)
+abline(v=sqrt(qchisq(.975, df=2)))
+abline(h=c(2.5,-2.5))
+
+
+
+beta$LS_minus_mOpt[which(symbols=="WELL")]
+beta$beta_LS[which(symbols=="WELL")]
+beta$beta_mOpt[which(symbols=="WELL")]
+beta$sector[which(symbols=="WELL")]
+
+
+data$WELL[116]#"2020-03-20"
+data$Mkt.RF[116]
+
+data$WELL[119]#"2020-04-09"
+data$Mkt.RF[119]
+
+#c(51, 113, 115, 116 ,117, 118, 119 ,120  ,125 ,127, 150)
+
+```
+
+
+```{r  table for locations of outliers}
+#################################
+#5 lists
+#each list contains dates in quadrant with 11+1 frequencies
+#frequencies for each sector and total
+
+sectors<-c("telecomunication","energy","utilities","basic_materials","industrial","consumer_staples","consumer_discrectionary","real_estate","financial","healthcare","technology","total")
+outlier<-list()
+tot_up_left<-c()
+tot_up_right<-c()
+tot_right<-c()
+tot_down_right<-c()
+tot_down_left<-c()
+
+for (i in 1:11) {
+  
+sector_data<-data[,c((i*20-18):(20*i+1),222)]
+up_left<-c()
+up_right<-c()
+right<-c()
+down_right<-c()
+down_left<-c()
+
+for (j in 1:20) {
+  stock_mkt<-sector_data[,c(i,21)]
+  reg<-lmrobdetMM(stock_mkt[,1]~Mkt.RF, data=stock_mkt)
+  scaled_residuals<-reg$residuals/reg$scale
+  robust_distance<-sqrt(CovMve(stock_mkt)$mah)
+  
+#here I have to create the table counting ouliers in each of the 5 location for each sector
+  up_left<-c(up_left,as.character(data$Date[unique(which(robust_distance<sqrt(qchisq(.975, df=2))&scaled_residuals>2.5))]))
+  
+  up_right<-c(up_right,as.character(data$Date[unique(which(robust_distance>sqrt(qchisq(.975, df=2))&scaled_residuals>2.5))]))
+  
+  right<-c(right,as.character(data$Date[unique(which(robust_distance>sqrt(qchisq(.975, df=2))&abs(scaled_residuals)<2.5))])) 
+  
+  down_right<-c(down_right,as.character(data$Date[unique(which(robust_distance>sqrt(qchisq(.975, df=2))&scaled_residuals<(-2.5)))]))
+  
+  down_left<-c(down_left,as.character(data$Date[unique(which(robust_distance<sqrt(qchisq(.975, df=2))&scaled_residuals<(-2.5)))]))
+  
+tot_up_left<-c(tot_up_left,as.character(data$Date[unique(which(robust_distance<sqrt(qchisq(.975, df=2))&scaled_residuals>2.5))]))
+tot_up_right<-c(tot_up_right,as.character(data$Date[unique(which(robust_distance>sqrt(qchisq(.975, df=2))&abs(scaled_residuals)>2.5))]))
+tot_right<-c(tot_right,as.character(data$Date[unique(which(robust_distance>sqrt(qchisq(.975, df=2))&abs(scaled_residuals)<2.5))]))
+tot_down_right<-c(tot_down_right,as.character(data$Date[unique(which(robust_distance>sqrt(qchisq(.975, df=2))&scaled_residuals<(-2.5)))]))
+tot_down_left<-c(tot_down_left,as.character(data$Date[unique(which(robust_distance<sqrt(qchisq(.975, df=2))&scaled_residuals<(-2.5)))]))
+}
+
+sector_list<-list(table(up_left),table(up_right),table(right),table(down_right),table(down_left))
+names(sector_list)<-c("up_left","up_right","right","down_right","down_left")
+sector_list<-list(sector_list)
+names(sector_list)<-sectors[i]
+outlier<-append(outlier,sector_list)  
+}
+
+
+
+##Plot of outliers by sector
+type<-c("Vertical outliers","Bad leverage points","Good leverage points","Bad leverage points","Vertical outliers")
+k<-1
+for (i in outlier) {
+  l<-1
+  for (j in i) {
+    if(length(j)>0){
+  plot(j,xaxt = "n", yaxt = "n", ylab="frequency of ouliers date",main=sectors[k],sub=type[l], col=c("darkred","darkblue"),lwd=3)
+## Draw x-axis without labels.
+axis(side = 1, labels = FALSE)
+## Draw y-axis.
+axis(side = 2,
+     ## Rotate labels perpendicular to y-axis.
+     las = 2,
+     ## Adjust y-axis label positions.
+     mgp = c(3, 0.75, 0))
+## Draw the x-axis labels.
+text(x = 1:length(j),
+     ## Move labels to just below bottom of chart.
+     y = (par("usr")[3] - 1.7),
+     ## Use names from the data list.
+     labels = names(j),
+     ## Change the clipping region.
+     xpd = NA,
+     ## Rotate the labels by 35 degrees.
+     srt = 35,
+     ## Adjust the labels to almost 100% right-justified.
+     adj = 0.965,
+     ## Increase label size.
+     cex = 0.6)
+    }
+    l<-l+1
+  }
+  k<-k+1
+}
+
+
+###Adjusting TOT outliers
+total_outliers<-list(table(tot_up_left),table(tot_up_right),table(tot_right),table(tot_down_right),table(tot_down_left))
+names(total_outliers)<-c("up_left","up_right","right","down_right","down_left")
+total_outliers$up_left<-total_outliers$up_left[which(total_outliers$up_left>10)]
+total_outliers$up_right<-total_outliers$up_right[which(total_outliers$up_right>10)]
+total_outliers$right<-total_outliers$right[which(total_outliers$right>10)]
+total_outliers$down_right<-total_outliers$down_right[which(total_outliers$down_right>10)]
+total_outliers$down_left<-total_outliers$down_left[which(total_outliers$down_left>10)]
+
+
+###Plotting TOT outliers
+type<-c("Vertical outliers","Bad leverage points","Good leverage points","Bad leverage points","Vertical outliers")
+k<-1
+for (j in total_outliers) {
+  plot(j,xaxt = "n", yaxt = "n", ylab="frequency of ouliers date",main=type[k], col=c("darkgreen","purple"),lwd=3)
+## Draw x-axis without labels.
+axis(side = 1, labels = FALSE)
+## Draw y-axis.
+axis(side = 2,
+     ## Rotate labels perpendicular to y-axis.
+     las = 2,
+     ## Adjust y-axis label positions.
+     mgp = c(3, 0.75, 0))
+## Draw the x-axis labels.
+text(x = 1:length(j),
+     ## Move labels to just below bottom of chart.
+     y = (par("usr")[3] - 5),
+     ## Use names from the data list.
+     labels = names(j),
+     ## Change the clipping region.
+     xpd = NA,
+     ## Rotate the labels by 35 degrees.
+     srt = 35,
+     ## Adjust the labels to almost 100% right-justified.
+     adj = 0.965,
+     ## Increase label size.
+     cex = 0.6)
+  k<-k+1
+  }
+
+#Right points are leverage points
+
+#Up and Down points are regression outliers
+
+#Up-right and Down-right are bad Leverage points
+
+#Up-left and Down-left are vertical outliers   
+
+#right are good leverage points
+
+
+#if OLS-MM < 0 (OLS<MM) then the line is steeper for the MM because we have DOWN outliers
+
+#if OLS-MM > 0 (OLS>MM) then the line is flatter for the MM because we have UP outliers
+```
+
+```{r  CAPM plot for WELL}
+mOpt_reg<-lmrobdetMM(WELL~Mkt.RF, data=data)
+LS_reg<-lm(WELL~Mkt.RF, data=data)
+
+ggplot(data=data, aes(x = Mkt.RF, y = WELL)) +
+  geom_point(size=0.7) +
+  geom_abline(intercept = mOpt_reg$coefficients[1], slope =mOpt_reg$coefficients[2], color="red",linetype="dashed", size=0.75)+
+  geom_abline(intercept = LS_reg$coefficients[1], slope =LS_reg$coefficients[2], color="blue",linetype="dashed", size=0.75)+
+  theme_classic()+
+  annotate(geom="text", y=0.2,x=0.2,label="LS",colour = "blue")+
+  annotate(geom="text", y=0,x=0.2,label="mOpt",colour = "red")+
+   xlab("Market excess return")+
+   ylab("WELL excess return")+
+  geom_text(data=subset(data, WELL > 0.4|WELL<(-0.2)|Mkt.RF<(-0.08)),aes(x = Mkt.RF, y = WELL, label=Date),nudge_x = 0.03,nudge_y = -0.01,size=3)+
+  ggtitle("WEEL weekly returns (1/1/2018 - 31/12/2021)")
+```
+
+```{r  table for locations of outliers 2}
+#################################
+#5 lists
+#each list contains dates in quadrant with 11+1 frequencies
+#frequencies for each sector and total
+
+sectors<-c("telecomunication","energy","utilities","basic_materials","industrial","consumer_staples","consumer_discrectionary","real_estate","financial","healthcare","technology","total")
+outlier<-list()
+tot_up_left<-c()
+tot_up_right<-c()
+tot_right<-c()
+tot_down_right<-c()
+tot_down_left<-c()
+
+mcd.out <-covMcd(data$Mkt.RF)
+robust_distance<-abs((data$Mkt.RF-mcd.out$center)/sqrt(mcd.out$cov))
+
+for (i in 1:11) {
+  
+sector_data<-data[,c((i*20-18):(20*i+1),222)]
+up_left<-c()
+up_right<-c()
+right<-c()
+down_right<-c()
+down_left<-c()
+
+for (j in 1:20) {
+  stock_mkt<-sector_data[,c(i,21)]
+  reg<-lmrobdetMM(stock_mkt[,1]~Mkt.RF, data=stock_mkt)
+  scaled_residuals<-reg$residuals/reg$scale
+  
+  #mcd.out <-covMcd(stock_mkt$Mkt.RF)
+  #robust_distance<-abs((use$stock_mkt$Mkt.RF-mcd.out$center)/sqrt(mcd.out$cov))
+  
+#here I have to create the table counting ouliers in each of the 5 location for each sector
+  up_left<-c(up_left,as.character(data$Date[unique(which(robust_distance<sqrt(qchisq(.975, df=2))&scaled_residuals>2.5))]))
+  
+  up_right<-c(up_right,as.character(data$Date[unique(which(robust_distance>sqrt(qchisq(.975, df=2))&scaled_residuals>2.5))]))
+  
+  right<-c(right,as.character(data$Date[unique(which(robust_distance>sqrt(qchisq(.975, df=2))&abs(scaled_residuals)<2.5))])) 
+  
+  down_right<-c(down_right,as.character(data$Date[unique(which(robust_distance>sqrt(qchisq(.975, df=2))&scaled_residuals<(-2.5)))]))
+  
+  down_left<-c(down_left,as.character(data$Date[unique(which(robust_distance<sqrt(qchisq(.975, df=2))&scaled_residuals<(-2.5)))]))
+  
+tot_up_left<-c(tot_up_left,as.character(data$Date[unique(which(robust_distance<sqrt(qchisq(.975, df=2))&scaled_residuals>2.5))]))
+tot_up_right<-c(tot_up_right,as.character(data$Date[unique(which(robust_distance>sqrt(qchisq(.975, df=2))&abs(scaled_residuals)>2.5))]))
+tot_right<-c(tot_right,as.character(data$Date[unique(which(robust_distance>sqrt(qchisq(.975, df=2))&abs(scaled_residuals)<2.5))]))
+tot_down_right<-c(tot_down_right,as.character(data$Date[unique(which(robust_distance>sqrt(qchisq(.975, df=2))&scaled_residuals<(-2.5)))]))
+tot_down_left<-c(tot_down_left,as.character(data$Date[unique(which(robust_distance<sqrt(qchisq(.975, df=2))&scaled_residuals<(-2.5)))]))
+}
+
+sector_list<-list(table(up_left),table(up_right),table(right),table(down_right),table(down_left))
+names(sector_list)<-c("up_left","up_right","right","down_right","down_left")
+sector_list<-list(sector_list)
+names(sector_list)<-sectors[i]
+outlier<-append(outlier,sector_list)  
+}
+
+
+
+##Plot of outliers by sector
+type<-c("Vertical outliers (high)","Bad leverage points (high)","Good leverage points","Bad leverage points (low)","Vertical outliers (low)")
+k<-1
+for (i in outlier) {
+  l<-1
+  for (j in i) {
+    if(length(j)>0){
+  plot(j,xaxt = "n", yaxt = "n", ylab="frequency of ouliers date",main=sectors[k],sub=type[l], col=c("darkred","darkblue"),lwd=3)
+## Draw x-axis without labels.
+axis(side = 1, labels = FALSE)
+## Draw y-axis.
+axis(side = 2,
+     ## Rotate labels perpendicular to y-axis.
+     las = 2,
+     ## Adjust y-axis label positions.
+     mgp = c(3, 0.75, 0))
+## Draw the x-axis labels.
+text(x = 1:length(j),
+     ## Move labels to just below bottom of chart.
+     y = (par("usr")[3] - 1.7),
+     ## Use names from the data list.
+     labels = names(j),
+     ## Change the clipping region.
+     xpd = NA,
+     ## Rotate the labels by 35 degrees.
+     srt = 35,
+     ## Adjust the labels to almost 100% right-justified.
+     adj = 0.965,
+     ## Increase label size.
+     cex = 0.6)
+    }
+    l<-l+1
+  }
+  k<-k+1
+}
+
+
+###Adjusting TOT outliers
+total_outliers<-list(table(tot_up_left),table(tot_up_right),table(tot_right),table(tot_down_right),table(tot_down_left))
+names(total_outliers)<-c("up_left","up_right","right","down_right","down_left")
+#total_outliers$up_left<-total_outliers$up_left[which(total_outliers$up_left>10)]
+#total_outliers$up_right<-total_outliers$up_right[which(total_outliers$up_right>10)]
+#total_outliers$right<-total_outliers$right[which(total_outliers$right>10)]
+#total_outliers$down_right<-total_outliers$down_right[which(total_outliers$down_right>10)]
+#total_outliers$down_left<-total_outliers$down_left[which(total_outliers$down_left>10)]
+
+
+###Plotting TOT outliers
+type<-c("Vertical outliers (high)","Bad leverage points (high)","Good leverage points","Bad leverage points (low)","Vertical outliers (low)")
+k<-1
+for (j in total_outliers) {
+  plot(j,xaxt = "n", yaxt = "n", ylab="frequency of ouliers date",main=type[k], col=c("darkgreen","purple"),lwd=3, ylim=c(0,100))
+## Draw x-axis without labels.
+axis(side = 1, labels = FALSE)
+## Draw y-axis.
+axis(side = 2,
+     ## Rotate labels perpendicular to y-axis.
+     las = 2,
+     ## Adjust y-axis label positions.
+     mgp = c(3, 0.75, 0))
+## Draw the x-axis labels.
+text(x = 1:length(j),
+     ## Move labels to just below bottom of chart.
+     y = (par("usr")[3] - 5),
+     ## Use names from the data list.
+     labels = names(j),
+     ## Change the clipping region.
+     xpd = NA,
+     ## Rotate the labels by 35 degrees.
+     srt = 35,
+     ## Adjust the labels to almost 100% right-justified.
+     adj = 0.965,
+     ## Increase label size.
+     cex = 0.6)
+  k<-k+1
+  }
+
+#Right points are leverage points
+
+#Up and Down points are regression outliers
+
+#Up-right and Down-right are bad Leverage points
+
+#Up-left and Down-left are vertical outliers   
+
+#right are good leverage points
+
+
+#if OLS-MM < 0 (OLS<MM) then the line is steeper for the MM because we have DOWN outliers
+
+#if OLS-MM > 0 (OLS>MM) then the line is flatter for the MM because we have UP outliers
+```
+
+```{r  table for locations of outliers right}
+#################################
+#5 lists
+#each list contains dates in quadrant with 11+1 frequencies
+#frequencies for each sector and total
+
+sectors<-c("telecomunication","energy","utilities","basic_materials","industrial","consumer_staples","consumer_discrectionary","real_estate","financial","healthcare","technology","total")
+outlier<-list()
+tot_up_left<-c()
+tot_up_right<-c()
+tot_right<-c()
+tot_down_right<-c()
+tot_down_left<-c()
+
+right_indexes<-which(data$Mkt.RF>0)
+
+mcd.out <-covMcd(data$Mkt.RF)
+robust_distance<-abs((data$Mkt.RF-mcd.out$center)/sqrt(mcd.out$cov))
+right_robust_distance<-robust_distance[right_indexes]
+
+for (i in 1:11) {
+  
+sector_data<-data[,c((i*20-18):(20*i+1),222)]
+up_left<-c()
+up_right<-c()
+right<-c()
+down_right<-c()
+down_left<-c()
+
+for (j in 1:20) {
+  stock_mkt<-sector_data[,c(i,21)]
+  reg<-lmrobdetMM(stock_mkt[,1]~Mkt.RF, data=stock_mkt)
+  scaled_residuals<-reg$residuals/reg$scale
+  right_scaled_residuals<-scaled_residuals[right_indexes]
+  #mcd.out <-covMcd(stock_mkt$Mkt.RF)
+  #robust_distance<-abs((use$stock_mkt$Mkt.RF-mcd.out$center)/sqrt(mcd.out$cov))
+  
+#here I have to create the table counting ouliers in each of the 5 location for each sector
+  up_left<-c(up_left,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance<sqrt(qchisq(.975, df=2))&right_scaled_residuals>2.5))]))
+  
+  up_right<-c(up_right,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance>sqrt(qchisq(.975, df=2))&right_scaled_residuals>2.5))]))
+  
+  right<-c(right,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance>sqrt(qchisq(.975, df=2))&abs(right_scaled_residuals)<2.5))])) 
+  
+  down_right<-c(down_right,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance>sqrt(qchisq(.975, df=2))&right_scaled_residuals<(-2.5)))]))
+  
+  down_left<-c(down_left,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance<sqrt(qchisq(.975, df=2))&right_scaled_residuals<(-2.5)))]))
+  
+tot_up_left<-c(tot_up_left,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance<sqrt(qchisq(.975, df=2))&right_scaled_residuals>2.5))]))
+tot_up_right<-c(tot_up_right,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance>sqrt(qchisq(.975, df=2))&abs(right_scaled_residuals)>2.5))]))
+tot_right<-c(tot_right,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance>sqrt(qchisq(.975, df=2))&abs(right_scaled_residuals)<2.5))]))
+tot_down_right<-c(tot_down_right,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance>sqrt(qchisq(.975, df=2))&right_scaled_residuals<(-2.5)))]))
+tot_down_left<-c(tot_down_left,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance<sqrt(qchisq(.975, df=2))&right_scaled_residuals<(-2.5)))]))
+}
+
+sector_list<-list(table(up_left),table(up_right),table(right),table(down_right),table(down_left))
+names(sector_list)<-c("up_left","up_right","right","down_right","down_left")
+sector_list<-list(sector_list)
+names(sector_list)<-sectors[i]
+outlier<-append(outlier,sector_list)  
+}
+
+
+
+##Plot of outliers by sector
+type<-c("Vertical outliers (high)","Bad leverage points (high)","Good leverage points","Bad leverage points (low)","Vertical outliers (low)")
+k<-1
+for (i in outlier) {
+  l<-1
+  for (j in i) {
+    if(length(j)>0){
+  plot(j,xaxt = "n", yaxt = "n", ylab="frequency of ouliers date",main=sectors[k],sub=type[l], col=c("darkred","darkblue"),lwd=3)
+## Draw x-axis without labels.
+axis(side = 1, labels = FALSE)
+## Draw y-axis.
+axis(side = 2,
+     ## Rotate labels perpendicular to y-axis.
+     las = 2,
+     ## Adjust y-axis label positions.
+     mgp = c(3, 0.75, 0))
+## Draw the x-axis labels.
+text(x = 1:length(j),
+     ## Move labels to just below bottom of chart.
+     y = (par("usr")[3] - 1.7),
+     ## Use names from the data list.
+     labels = names(j),
+     ## Change the clipping region.
+     xpd = NA,
+     ## Rotate the labels by 35 degrees.
+     srt = 35,
+     ## Adjust the labels to almost 100% right-justified.
+     adj = 0.965,
+     ## Increase label size.
+     cex = 0.6)
+    }
+    l<-l+1
+  }
+  k<-k+1
+}
+
+
+###Adjusting TOT outliers
+total_outliers<-list(table(tot_up_left),table(tot_up_right),table(tot_right),table(tot_down_right),table(tot_down_left))
+names(total_outliers)<-c("up_left","up_right","right","down_right","down_left")
+#total_outliers$up_left<-total_outliers$up_left[which(total_outliers$up_left>10)]
+#total_outliers$up_right<-total_outliers$up_right[which(total_outliers$up_right>10)]
+#total_outliers$right<-total_outliers$right[which(total_outliers$right>10)]
+#total_outliers$down_right<-total_outliers$down_right[which(total_outliers$down_right>10)]
+#total_outliers$down_left<-total_outliers$down_left[which(total_outliers$down_left>10)]
+
+
+###Plotting TOT outliers
+type<-c("Vertical outliers (high)","Bad leverage points (high)","Good leverage points","Bad leverage points (low)","Vertical outliers (low)")
+k<-1
+for (j in total_outliers) {
+  plot(j,xaxt = "n", yaxt = "n", ylab="frequency of ouliers date",main=type[k], col=c("darkgreen","purple"),lwd=3, ylim=c(0,100))
+## Draw x-axis without labels.
+axis(side = 1, labels = FALSE)
+## Draw y-axis.
+axis(side = 2,
+     ## Rotate labels perpendicular to y-axis.
+     las = 2,
+     ## Adjust y-axis label positions.
+     mgp = c(3, 0.75, 0))
+## Draw the x-axis labels.
+text(x = 1:length(j),
+     ## Move labels to just below bottom of chart.
+     y = (par("usr")[3] - 5),
+     ## Use names from the data list.
+     labels = names(j),
+     ## Change the clipping region.
+     xpd = NA,
+     ## Rotate the labels by 35 degrees.
+     srt = 35,
+     ## Adjust the labels to almost 100% right-justified.
+     adj = 0.965,
+     ## Increase label size.
+     cex = 0.6)
+  k<-k+1
+  }
+
+#Right points are leverage points
+
+#Up and Down points are regression outliers
+
+#Up-right and Down-right are bad Leverage points
+
+#Up-left and Down-left are vertical outliers   
+
+#right are good leverage points
+
+
+#if OLS-MM < 0 (OLS<MM) then the line is steeper for the MM because we have DOWN outliers
+
+#if OLS-MM > 0 (OLS>MM) then the line is flatter for the MM because we have UP outliers
+
+```
+
+```{r average of standardized residuals of outliers}
+##TOTAL
+  count<-c()
+  average_outliers<-c()
+  right_indexes<-which(data$Mkt.RF>0)
+  for (i in 1:length(symbols)) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count<-c(count,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+    average_outliers<-c(average_outliers,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+  }
+  
+  count2<-c()
+  average_outliers2<-c()
+  right_indexes<-which(data$Mkt.RF>0)
+  for (i in 1:length(symbols)) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count2<-c(count2,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+    average_outliers2<-c(average_outliers2,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+  }
+  
+  print("TOTAL, for positive MKT returns:")
+  print(c("high mean",mean(na.omit(average_outliers))))
+  print(c("high count",sum(count)))
+  print(c("low mean",mean(na.omit(average_outliers2))))
+  print(c("low count",sum(count2)))
+  
+  count<-c()
+  average_outliers<-c()
+  right_indexes<-which(data$Mkt.RF<0)
+  for (i in 1:length(symbols)) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count<-c(count,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+    average_outliers<-c(average_outliers,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+  }
+  
+  count2<-c()
+  average_outliers2<-c()
+  right_indexes<-which(data$Mkt.RF<0)
+  for (i in 1:length(symbols)) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count2<-c(count2,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+    average_outliers2<-c(average_outliers2,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+  }
+  
+  print("TOTAL, for negative MKT returns:")
+  print(c("high mean",mean(na.omit(average_outliers))))
+  print(c("high count",sum(count)))
+  print(c("low mean",mean(na.omit(average_outliers2))))
+  print(c("low count",sum(count2)))
+  
+  
+  
+  
+##REAL ESTATE 141:160
+  count<-c()
+  average_outliers<-c()
+  right_indexes<-which(data$Mkt.RF>0)
+  for (i in 141:160) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count<-c(count,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+    average_outliers<-c(average_outliers,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+  }
+  
+  count2<-c()
+  average_outliers2<-c()
+  right_indexes<-which(data$Mkt.RF>0)
+  for (i in 141:160) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count2<-c(count2,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+    average_outliers2<-c(average_outliers2,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+  }
+  
+  print("REAL ESTATE, for positive MKT returns:")
+  print(c("high mean",mean(na.omit(average_outliers))))
+  print(c("high count",sum(count)))
+  print(c("low mean",mean(na.omit(average_outliers2))))
+  print(c("low count",sum(count2)))
+  
+  count<-c()
+  average_outliers<-c()
+  right_indexes<-which(data$Mkt.RF<0)
+  for (i in 141:160) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count<-c(count,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+    average_outliers<-c(average_outliers,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+  }
+  
+  count2<-c()
+  average_outliers2<-c()
+  right_indexes<-which(data$Mkt.RF<0)
+  for (i in 141:160) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count2<-c(count2,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+    average_outliers2<-c(average_outliers2,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+  }
+  
+  print("REAL ESTATE, for negative MKT returns:")
+  print(c("high mean",mean(na.omit(average_outliers))))
+  print(c("high count",sum(count)))
+  print(c("low mean",mean(na.omit(average_outliers2))))
+  print(c("low count",sum(count2)))
+  
+  ##UTILITIES 41:60
+  
+  count<-c()
+  average_outliers<-c()
+  right_indexes<-which(data$Mkt.RF>0)
+  for (i in 41:60) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count<-c(count,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+    average_outliers<-c(average_outliers,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+  }
+  
+  count2<-c()
+  average_outliers2<-c()
+  right_indexes<-which(data$Mkt.RF>0)
+  for (i in 41:60) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count2<-c(count2,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+    average_outliers2<-c(average_outliers2,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+  }
+  
+  print("UTILITIES, for positive MKT returns:")
+  print(c("high mean",mean(na.omit(average_outliers))))
+  print(c("high count",sum(count)))
+  print(c("low mean",mean(na.omit(average_outliers2))))
+  print(c("low count",sum(count2)))
+  
+  count<-c()
+  average_outliers<-c()
+  right_indexes<-which(data$Mkt.RF<0)
+  for (i in 41:60) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count<-c(count,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+    average_outliers<-c(average_outliers,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+  }
+  
+  count2<-c()
+  average_outliers2<-c()
+  right_indexes<-which(data$Mkt.RF<0)
+  for (i in 41:60) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count2<-c(count2,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+    average_outliers2<-c(average_outliers2,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+  }
+  
+  print("UTILITIES, for negative MKT returns:")
+  print(c("high mean",mean(na.omit(average_outliers))))
+  print(c("high count",sum(count)))
+  print(c("low mean",mean(na.omit(average_outliers2))))
+  print(c("low count",sum(count2)))
+  
+   ##TECHNOLOGY 201:220
+  
+  count<-c()
+  average_outliers<-c()
+  right_indexes<-which(data$Mkt.RF>0)
+  for (i in 201:220) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count<-c(count,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+    average_outliers<-c(average_outliers,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+  }
+  
+  count2<-c()
+  average_outliers2<-c()
+  right_indexes<-which(data$Mkt.RF>0)
+  for (i in 201:220) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count2<-c(count2,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+    average_outliers2<-c(average_outliers2,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+  }
+  
+  print("TECHNOLOGY, for positive MKT returns:")
+  print(c("high mean",mean(na.omit(average_outliers))))
+  print(c("high count",sum(count)))
+  print(c("low mean",mean(na.omit(average_outliers2))))
+  print(c("low count",sum(count2)))
+  
+  count<-c()
+  average_outliers<-c()
+  right_indexes<-which(data$Mkt.RF<0)
+  for (i in 201:220) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count<-c(count,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+    average_outliers<-c(average_outliers,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+  }
+  
+  count2<-c()
+  average_outliers2<-c()
+  right_indexes<-which(data$Mkt.RF<0)
+  for (i in 201:220) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count2<-c(count2,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+    average_outliers2<-c(average_outliers2,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+  }
+  
+  print("TECHNOLOGY, for negative MKT returns:")
+  print(c("high mean",mean(na.omit(average_outliers))))
+  print(c("high count",sum(count)))
+  print(c("low mean",mean(na.omit(average_outliers2))))
+  print(c("low count",sum(count2)))
+  
+
+  
+  
+  
+  ######################################## ALL
+  for (j in 1:11) {
+  
+
+    
+  count<-c()
+  average_outliers<-c()
+  right_indexes<-which(data$Mkt.RF>0)
+  for (i in (j*20-19):(20*j)) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count<-c(count,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+    average_outliers<-c(average_outliers,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+  }
+  
+  count2<-c()
+  average_outliers2<-c()
+  right_indexes<-which(data$Mkt.RF>0)
+  for (i in (j*20-19):(20*j)) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count2<-c(count2,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+    average_outliers2<-c(average_outliers2,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+  }
+  
+  print(c(sectors[j]," for positive MKT returns:"))
+  print(c("high mean",mean(na.omit(average_outliers))))
+  print(c("high count",sum(count)))
+  print(c("low mean",mean(na.omit(average_outliers2))))
+  print(c("low count",sum(count2)))
+  
+  count<-c()
+  average_outliers<-c()
+  right_indexes<-which(data$Mkt.RF<0)
+  for (i in (j*20-19):(20*j)) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count<-c(count,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+    average_outliers<-c(average_outliers,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]>2.5)]))
+  }
+  
+  count2<-c()
+  average_outliers2<-c()
+  right_indexes<-which(data$Mkt.RF<0)
+  for (i in (j*20-19):(20*j)) {
+    reg<-MM_regressions[[i]]
+    scaled_residuals<-reg$residuals/reg$scale
+    count2<-c(count2,length(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+    average_outliers2<-c(average_outliers2,mean(scaled_residuals[right_indexes][(scaled_residuals[right_indexes]<(-2.5))]))
+  }
+  
+  print(c(sectors[j]," for negative MKT returns:"))
+  print(c("high mean",mean(na.omit(average_outliers))))
+  print(c("high count",sum(count)))
+  print(c("low mean",mean(na.omit(average_outliers2))))
+  print(c("low count",sum(count2)))
+  }
+  sectors
+  
+```
+
+
+```{r  table for locations of outliers left}
+#################################
+#5 lists
+#each list contains dates in quadrant with 11+1 frequencies
+#frequencies for each sector and total
+
+sectors<-c("telecomunication","energy","utilities","basic_materials","industrial","consumer_staples","consumer_discrectionary","real_estate","financial","healthcare","technology","total")
+outlier<-list()
+tot_up_left<-c()
+tot_up_right<-c()
+tot_right<-c()
+tot_down_right<-c()
+tot_down_left<-c()
+
+right_indexes<-which(data$Mkt.RF<0)
+mcd.out <-covMcd(data$Mkt.RF)
+robust_distance<-abs((data$Mkt.RF-mcd.out$center)/sqrt(mcd.out$cov))
+right_robust_distance<-robust_distance[right_indexes]
+
+for (i in 1:11) {
+  
+sector_data<-data[,c((i*20-18):(20*i+1),222)]
+up_left<-c()
+up_right<-c()
+right<-c()
+down_right<-c()
+down_left<-c()
+
+for (j in 1:20) {
+  stock_mkt<-sector_data[,c(i,21)]
+  reg<-lmrobdetMM(stock_mkt[,1]~Mkt.RF, data=stock_mkt)
+  scaled_residuals<-reg$residuals/reg$scale
+  right_scaled_residuals<-scaled_residuals[right_indexes]
+  #mcd.out <-covMcd(stock_mkt$Mkt.RF)
+  #robust_distance<-abs((use$stock_mkt$Mkt.RF-mcd.out$center)/sqrt(mcd.out$cov))
+  
+#here I have to create the table counting ouliers in each of the 5 location for each sector
+  up_left<-c(up_left,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance<sqrt(qchisq(.975, df=2))&right_scaled_residuals>2.5))]))
+  
+  up_right<-c(up_right,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance>sqrt(qchisq(.975, df=2))&right_scaled_residuals>2.5))]))
+  
+  right<-c(right,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance>sqrt(qchisq(.975, df=2))&abs(right_scaled_residuals)<2.5))])) 
+  
+  down_right<-c(down_right,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance>sqrt(qchisq(.975, df=2))&right_scaled_residuals<(-2.5)))]))
+  
+  down_left<-c(down_left,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance<sqrt(qchisq(.975, df=2))&right_scaled_residuals<(-2.5)))]))
+  
+tot_up_left<-c(tot_up_left,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance<sqrt(qchisq(.975, df=2))&right_scaled_residuals>2.5))]))
+tot_up_right<-c(tot_up_right,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance>sqrt(qchisq(.975, df=2))&abs(right_scaled_residuals)>2.5))]))
+tot_right<-c(tot_right,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance>sqrt(qchisq(.975, df=2))&abs(right_scaled_residuals)<2.5))]))
+tot_down_right<-c(tot_down_right,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance>sqrt(qchisq(.975, df=2))&right_scaled_residuals<(-2.5)))]))
+tot_down_left<-c(tot_down_left,as.character(data[right_indexes,]$Date[unique(which(right_robust_distance<sqrt(qchisq(.975, df=2))&right_scaled_residuals<(-2.5)))]))
+}
+
+sector_list<-list(table(up_left),table(up_right),table(right),table(down_right),table(down_left))
+names(sector_list)<-c("up_left","up_right","right","down_right","down_left")
+sector_list<-list(sector_list)
+names(sector_list)<-sectors[i]
+outlier<-append(outlier,sector_list)  
+}
+
+
+
+##Plot of outliers by sector
+type<-c("Vertical outliers (high)","Bad leverage points (high)","Good leverage points","Bad leverage points (low)","Vertical outliers (low)")
+k<-1
+for (i in outlier) {
+  l<-1
+  for (j in i) {
+    if(length(j)>0){
+  plot(j,xaxt = "n", yaxt = "n", ylab="frequency of ouliers date",main=sectors[k],sub=type[l], col=c("darkred","darkblue"),lwd=3)
+## Draw x-axis without labels.
+axis(side = 1, labels = FALSE)
+## Draw y-axis.
+axis(side = 2,
+     ## Rotate labels perpendicular to y-axis.
+     las = 2,
+     ## Adjust y-axis label positions.
+     mgp = c(3, 0.75, 0))
+## Draw the x-axis labels.
+text(x = 1:length(j),
+     ## Move labels to just below bottom of chart.
+     y = (par("usr")[3] - 1.7),
+     ## Use names from the data list.
+     labels = names(j),
+     ## Change the clipping region.
+     xpd = NA,
+     ## Rotate the labels by 35 degrees.
+     srt = 35,
+     ## Adjust the labels to almost 100% right-justified.
+     adj = 0.965,
+     ## Increase label size.
+     cex = 0.6)
+    }
+    l<-l+1
+  }
+  k<-k+1
+}
+
+
+###Adjusting TOT outliers
+total_outliers<-list(table(tot_up_left),table(tot_up_right),table(tot_right),table(tot_down_right),table(tot_down_left))
+names(total_outliers)<-c("up_left","up_right","right","down_right","down_left")
+#total_outliers$up_left<-total_outliers$up_left[which(total_outliers$up_left>10)]
+#total_outliers$up_right<-total_outliers$up_right[which(total_outliers$up_right>10)]
+#total_outliers$right<-total_outliers$right[which(total_outliers$right>10)]
+#total_outliers$down_right<-total_outliers$down_right[which(total_outliers$down_right>10)]
+#total_outliers$down_left<-total_outliers$down_left[which(total_outliers$down_left>10)]
+
+
+###Plotting TOT outliers
+type<-c("Vertical outliers (high)","Bad leverage points (high)","Good leverage points","Bad leverage points (low)","Vertical outliers (low)")
+k<-1
+for (j in total_outliers) {
+  plot(j,xaxt = "n", yaxt = "n", ylab="frequency of ouliers date",main=type[k], col=c("darkgreen","purple"),lwd=3, ylim=c(0,100))
+## Draw x-axis without labels.
+axis(side = 1, labels = FALSE)
+## Draw y-axis.
+axis(side = 2,
+     ## Rotate labels perpendicular to y-axis.
+     las = 2,
+     ## Adjust y-axis label positions.
+     mgp = c(3, 0.75, 0))
+## Draw the x-axis labels.
+text(x = 1:length(j),
+     ## Move labels to just below bottom of chart.
+     y = (par("usr")[3] - 5),
+     ## Use names from the data list.
+     labels = names(j),
+     ## Change the clipping region.
+     xpd = NA,
+     ## Rotate the labels by 35 degrees.
+     srt = 35,
+     ## Adjust the labels to almost 100% right-justified.
+     adj = 0.965,
+     ## Increase label size.
+     cex = 0.6)
+  k<-k+1
+  }
+
+#Right points are leverage points
+
+#Up and Down points are regression outliers
+
+#Up-right and Down-right are bad Leverage points
+
+#Up-left and Down-left are vertical outliers   
+
+#right are good leverage points
+
+
+#if OLS-MM < 0 (OLS<MM) then the line is steeper for the MM because we have DOWN outliers
+
+#if OLS-MM > 0 (OLS>MM) then the line is flatter for the MM because we have UP outliers
+
+
+
+```
+
+
+```{r CV of future 2022 data}
+fama_test<-read.csv("F-F_Research_Data_Factors_weekly.csv",skip=3)
+fama_test[,2:5]<-fama_test[,2:5]/100
+fama_test<-fama_test[4984:4995,]
+colnames(fama_test)[1] = "Date"
+fama_test$Date = as.Date(strptime(fama_test$Date, format = "%Y%m%d"))
+
+
+
+symbols<-c(telecomunication,energy,utilities,basic_materials,industrial,consumer_staples,consumer_discrectionary,real_estate,financial,healthcare,technology)
+#stocks_test = lapply(symbols, function(sym){weeklyReturn(getSymbols(sym, from = "2022-1-7", to = "2022-4-1", auto.assign=FALSE))})
+#stocksWreturn_test<-do.call(merge, stocks_test)
+#colnames(stocksWreturn_test)<-symbols
+
+
+#stocksWreturn_test<-fortify.zoo(stocksWreturn_test)
+#colnames(stocksWreturn_test)<-c("Date", symbols)
+#stocksWreturn_test[,2:ncol(stocksWreturn_test)]<-stocksWreturn_test[,2:ncol(stocksWreturn_test)]-fama_test$RF #obtain excess return
+
+  #write.csv(stocksWreturn_test,file ="stocksWreturn_test.csv")
+  #stocksWreturn_test<-read.csv("stocksWreturn_test.csv")[,-1]
+
+#data_test = merge(stocksWreturn_test, fama_test, by = "Date")
+#write.csv(data_test,file ="data_test.csv")
+data_test<-read.csv("data_test.csv")[,-1]
+pred_OLS<-matrix(ncol = 220,nrow = nrow(data_test))
+pred_MM<-matrix(ncol = 220,nrow = nrow(data_test))
+for (i in 1:220) {
+  pred_OLS[,i]<-predict(OLS_regressions[[i]], newdata = data_test)
+  pred_MM[,i]<-predict(MM_regressions[[i]], newdata = data_test)
+}
+
+colnames(pred_OLS)<-symbols
+colnames(pred_MM)<-symbols
+temporary_data_test<-data_test[,2:221]
+
+
+OLS<-mean(as.matrix((temporary_data_test-pred_OLS)**2),trim=0.1)
+MM<-mean(as.matrix((temporary_data_test-pred_MM)**2),trim=0.1)
+RMSE<-data_frame(OLS,MM)
+row.names(RMSE)<-"RMSE"
+
+print(RMSE)
+```
+
+```{r second CV of future 2022 data}
+fama_test_updated<-read.csv("F-F_Research_Data_Factors_weekly_updated.csv",skip=3)
+fama_test_updated[,2:5]<-fama_test_updated[,2:5]/100
+fama_test_updated<-fama_test_updated[4984:4999,]
+colnames(fama_test_updated)[1] = "Date"
+fama_test_updated$Date = as.Date(strptime(fama_test_updated$Date, format = "%Y%m%d"))
+
+
+
+symbols<-c(telecomunication,energy,utilities,basic_materials,industrial,consumer_staples,consumer_discrectionary,real_estate,financial,healthcare,technology)
+#stocks_test_updated = lapply(symbols, function(sym){weeklyReturn(getSymbols(sym, from = "2022-1-7", to = "2022-4-29", auto.assign=FALSE))})
+#stocksWreturn_test_updated<-do.call(merge, stocks_test_updated)
+#colnames(stocksWreturn_test_updated)<-symbols
+
+
+#stocksWreturn_test_updated<-fortify.zoo(stocksWreturn_test_updated)
+#colnames(stocksWreturn_test_updated)<-c("Date", symbols)
+#stocksWreturn_test_updated[,2:ncol(stocksWreturn_test_updated)]<-stocksWreturn_test_updated[,2:ncol(stocksWreturn_test_updated)]-fama_test_updated$RF #obtain excess return
+
+#data_test_updated = merge(stocksWreturn_test_updated, fama_test_updated, by = "Date")
+#write.csv(data_test_updated,file ="data_test_updated.csv")
+data_test_updated<-read.csv("data_test_updated.csv")[,-1]
+
+pred_OLS_updated<-matrix(ncol = 220,nrow = nrow(data_test_updated))
+pred_MM_updated<-matrix(ncol = 220,nrow = nrow(data_test_updated))
+for (i in 1:220) {
+  pred_OLS_updated[,i]<-predict(OLS_regressions[[i]], newdata = data_test_updated)
+  pred_MM_updated[,i]<-predict(MM_regressions[[i]], newdata = data_test_updated)
+}
+
+colnames(pred_OLS_updated)<-symbols
+colnames(pred_MM_updated)<-symbols
+temporary_data_test_updated<-data_test_updated[,2:221]
+
+
+OLS_updated<-sqrt(mean(as.matrix((temporary_data_test_updated-pred_OLS_updated)**2),trim=0.1))
+MM_updated<-sqrt(mean(as.matrix((temporary_data_test_updated-pred_MM_updated)**2),trim=0.1))
+RMSE_updated<-data_frame(OLS_updated,MM_updated)
+row.names(RMSE_updated)<-"RMSE"
+
+print(RMSE_updated)
+
+
+
+upper.trim.mean<-function(x,trim) {
+  x<-sort(x) 
+  mean(x[1:floor(length(x)*(1-trim))])
+  }
+
+print("LS RMSE:")
+mean(sqrt(unlist(lapply((temporary_data_test_updated-pred_OLS_updated)**2,
+       FUN=function(x){mean(x,trim=0.1)}))))
+print("mOpt RMSE:")
+mean(sqrt(unlist(lapply((temporary_data_test_updated-pred_MM_updated)**2,
+       FUN=function(x){mean(x,trim=0.1)}))))
+
+
+print("LS RMSE:")
+mean(sqrt(unlist(lapply((temporary_data_test_updated-pred_OLS_updated)**2,
+       FUN=function(x){upper.trim.mean(x,trim=0.1)}))))
+print("mOpt RMSE:")
+mean(sqrt(unlist(lapply((temporary_data_test_updated-pred_MM_updated)**2,
+       FUN=function(x){upper.trim.mean(x,trim=0.1)}))))
+
+
+#for each stock I calculate the the differences between the actual values and the predicted ones then, I square this vector and I calculate  the trimmed mean 
+
+```
+
+```{r Plot of beta estimates}
+colors <- c("mOpt" = "orange", "LS" = "black")
+ggplot(data=beta, aes(y=beta_LS,x=1:length(beta_LS)))+
+  geom_point(size=0.5)+geom_point(y=beta_mOpt, col="orange",size =0.7, shape=17)+geom_line(size=0.2) +geom_line(aes(y=beta_mOpt, color = "mOpt"), size=0.2)+theme_classic()+ggtitle("LS and mOpt betas for all stocks",subtitle = "MKT beta (1/1/2018 - 31/12/2021)")+labs(y= "LS and mOpt beta", x = "stocks", color="Legend")+scale_color_manual(values = colors)+
+  theme(
+        #legend.title = element_text(size=14), #change legend title font size
+        legend.text = element_text(size=10) #change legend text font size
+)
+
+ggplot(data=beta, aes(y=beta_LS,x=1:length(beta_LS)))+
+  geom_point(size=0.5)+geom_point(y=beta_mOpt, col="orange",size =0.7, shape=17)+geom_line(size=0.2) +geom_line(y=beta_mOpt, col="orange", size=0.2)+theme_classic()+ggtitle("LS and mOpt betas for all stocks",subtitle = "MKT beta (1/1/2018 - 31/12/2021)")+labs(y= "LS and mOpt beta", x = "stocks")
+
+ggplot(data=beta, aes(y=LS_minus_mOpt,x=1:length(beta_LS),color=sector))+geom_point(size=0.5)+theme_classic()+ggtitle("OLS minus MM betas for all stocks",subtitle = "MKT beta (1/1/2018 - 31/12/2021)")+geom_line(size=0.2)+labs(x = "stocks")
+
+
+#Stocks with big difference
+symbols[which.max(beta$LS_minus_mOpt)] # VTR
+symbols[which(beta$LS_minus_mOpt>0.7)] # "APA"  "BA"   "WELL" "SPG"  
+
+
+##Outliers detection for VTR
+
+temp_data<-select(data, VTR, Mkt.RF)
+res<-lmrobdetMM(VTR~Mkt.RF, data=data)$residuals/lmrobdetMM(VTR~Mkt.RF, data=data)$scale
+mve_d<-sqrt(CovMve(temp_data)$mah)
+mcd_d<-sqrt(covMcd(temp_data)$mah)
+
+plot(mve_d,res,
+     text(
+          mve_d[unique(which(mve_d>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],
+          res[unique(which(mve_d>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],
+          data$Date[unique(which(mve_d>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],pos=2,cex=0.5
+          ),
+     xlab="Robust Distance",ylab="Standardized MM residuals"
+     )
+abline(v=sqrt(qchisq(.975, df=2)))
+abline(h=c(2.5,-2.5))
+
+
+##Outliers detection for APA
+
+temp_data<-select(data, APA, Mkt.RF)
+res<-lmrobdetMM(APA~Mkt.RF, data=data)$residuals/lmrobdetMM(APA~Mkt.RF, data=data)$scale
+mve_d<-sqrt(CovMve(temp_data)$mah)
+mcd_d<-sqrt(covMcd(temp_data)$mah)
+
+plot(mve_d,res,
+     text(
+          mve_d[unique(which(mve_d>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],
+          res[unique(which(mve_d>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],
+          data$Date[unique(which(mve_d>sqrt(qchisq(.975, df=2))|abs(res)>2.5))],pos=2,cex=0.5
+          ),
+     xlab="Robust Distance",ylab="Standardized MM residuals"
+     )
+abline(v=sqrt(qchisq(.975, df=2)))
+abline(h=c(2.5,-2.5))
+
+
+
+#percentage of differences larger than 0.4 or smaller than 0.4
+sum(beta$LS_minus_mOpt>0.3)/nrow(beta)
+sum(beta$LS_minus_mOpt<(-0.3))/nrow(beta)
+
+sd(beta$beta_LS)
+sd(beta$beta_mOpt)
+
+```
+
+```{r example of outliers detection}
+
+x<-c(4,5,7,8,8,10,11,7,8,9,6,5.5,10,10,20,5,15,14,12,23) #15
+y<-c(7,8,14,8,16,35,16,12,11,15,10,9.5,18,13,10,10,20,20,19,30) #6, 20
+
+res<-lmrobdetMM(y~x)$residuals/lmrobdetMM(y~x)$scale
+
+mcd.out <-covMcd(x)
+rds <- abs((x - mcd.out$center)/sqrt(mcd.out$cov))
+
+
+plot(rds,res,main="Robust outliers detetction",
+     xlab="Robust Distance",ylab="Standardized mOpt residuals",
+     cex =0.3,
+     text(
+          c(rds[c(6,15,20)],2.75,2.75,3.8,3.8,3.8,2.75),
+          c(res[c(6,15,20)],8.5,-3.5,1.5,8.5,-3.5,1.5),
+          c("A","B","C","Vertical outliers","Vertical outliers","Good leverage points","Bad leverage points","Bad leverage points","Regular points"),pos=2,cex=0.8
+          )
+     )
+abline(v=sqrt(qchisq(.975, df=2)))
+abline(h=c(2.5,-2.5))
+
+plot(x,y,main="mOpt regression",
+     
+     cex =0.3,
+     text(
+          x[c(6,15,20)],
+          y[c(6,15,20)],
+          c("A","B","C"),pos=1,cex=0.8
+          )
+     )
+abline(a=lmrobdetMM(y~x)$coefficients[1],b=lmrobdetMM(y~x)$coefficients[2], col="red")
+
+
+
+x<-c(11,4,5,7,8,8,11,7,8,9,6,5.5,10,10,5,11,10,12,8,7,10,18)
+y<-c(16,7,8,14,11,16,16,12,11,15,10,9.5,18,13,10,20,20,19,15,11,15,30)
+a<-data.frame(x,y)
+ggplot(data=a,aes(x=x,y=y))+
+  geom_point(size=3)+theme_classic()+xlim(2, 20)+ylim(2, 35)+labs(x ="X-axis", y = "Y-axis")
+
+x<-c(11,4,5,7,8,8,11,7,8,9,6,5.5,10,10,5,11,10,12,8,7,10,18)
+y<-c(16,7,8,14,11,16,16,12,11,15,10,9.5,18,13,10,20,20,19,15,11,15,13)
+a<-data.frame(x,y)
+ggplot(data=a,aes(x=x,y=y))+
+  geom_point(size=3)+theme_classic()+xlim(2, 20)+ylim(2, 35)+labs(x ="X-axis", y = "Y-axis")
+
+x<-c(11,4,5,7,8,8,11,7,8,9,6,5.5,10,10,5,11,10,12,8,7,10,8)
+y<-c(16,7,8,14,11,16,16,12,11,15,10,9.5,18,13,10,20,20,19,15,11,15,30)
+a<-data.frame(x,y)
+ggplot(data=a,aes(x=x,y=y))+
+  geom_point(size=3)+theme_classic()+xlim(2, 20)+ylim(2, 35)+labs(x ="X-axis", y = "Y-axis")
+```
+
+```{r}
+
+telecomunication<-arrange(filter(telecomunication, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+energy<-arrange(filter(energy, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+utilities<-arrange(filter(utilities, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+basic_materials<-arrange(filter(basic_materials, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+industrial<-arrange(filter(industrial, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+consumer_staples<-arrange(filter(consumer_staples), desc(Market.Cap))$Symbol[1:20]
+
+consumer_discrectionary<-arrange(filter(consumer_discrectionary, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+real_estate<-arrange(filter(real_estate, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+financial<-arrange(filter(financial, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+healthcare<-arrange(filter(healthcare, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+technology<-arrange(filter(technology, Country=="United States"), desc(Market.Cap))$Symbol[1:20]
+
+noquote(cbind(consumer_discrectionary,rep("&",20),real_estate,rep("&",20),financial,rep("&",20),healthcare,rep("&",20),technology))
+
+```
+
